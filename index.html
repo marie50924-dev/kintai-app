@@ -1,1 +1,719 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>勤怠管理</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:#f5f7fa;color:#2c3e50;font-size:15px}
+body{padding-bottom:80px}
+#loading-screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f5f7fa;z-index:9999}
+#loading-screen .clock{font-size:64px;margin-bottom:16px}
+#loading-screen .text{color:#2563eb;font-weight:bold;font-size:18px}
+#error-screen{position:fixed;inset:0;background:white;padding:24px;z-index:9998;display:none;flex-direction:column;overflow:auto}
+#error-screen.show{display:flex}
+#error-screen h2{color:#dc2626;margin-top:0}
+#error-screen pre{background:#fee;padding:12px;border-radius:8px;font-size:11px;overflow:auto;max-height:300px;white-space:pre-wrap;word-break:break-word}
+.header{background:white;padding:14px 16px;text-align:center;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:10}
+.header h1{margin:0;font-size:17px;color:#1f2937}
+.header .clock{font-size:13px;color:#6b7280;margin-top:2px}
+.tab-nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;border-top:1px solid #e5e7eb;padding-bottom:env(safe-area-inset-bottom);z-index:100}
+.tab-nav button{flex:1;background:none;border:none;padding:10px 2px;font-size:11px;color:#6b7280;cursor:pointer}
+.tab-nav button.active{color:#2563eb}
+.tab-nav button .icon{font-size:20px;display:block;margin-bottom:2px}
+.screen{padding:14px}
+.btn{display:block;width:100%;padding:14px;font-size:16px;font-weight:bold;border:none;border-radius:10px;background:#2563eb;color:white;cursor:pointer;margin-bottom:10px}
+.btn:active{opacity:0.7}
+.btn:disabled{background:#d1d5db;color:#6b7280}
+.btn.secondary{background:#6b7280}
+.btn.success{background:#16a34a}
+.btn.warning{background:#f59e0b}
+.btn.danger{background:#dc2626}
+.btn.small{padding:7px 11px;font-size:13px;margin:0;display:inline-block;width:auto}
+.card{background:white;border-radius:10px;padding:14px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,0.05)}
+.input,.select{width:100%;padding:11px;font-size:16px;border:1px solid #d1d5db;border-radius:8px;background:white;margin-bottom:8px;-webkit-appearance:none}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.status{text-align:center;padding:14px;border-radius:10px;margin-bottom:14px;font-weight:bold;font-size:16px}
+.status.not_started{background:#f3f4f6;color:#6b7280}
+.status.working{background:#dcfce7;color:#16a34a}
+.status.on_break{background:#fef3c7;color:#d97706}
+.status.finished{background:#dbeafe;color:#2563eb}
+.muted{color:#6b7280;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td{padding:7px 4px;border-bottom:1px solid #e5e7eb}
+.btn-row{display:flex;gap:8px}
+.btn-row .btn{flex:1}
+</style>
+</head>
+<body>
+
+<div id="loading-screen">
+<div class="clock">⏱</div>
+<div class="text">読み込み中…</div>
+</div>
+
+<div id="error-screen">
+<h2>⚠ エラー</h2>
+<p>アプリの起動に失敗しました。下のメッセージをスクショして相談してください。</p>
+<pre id="error-message"></pre>
+<button onclick="location.reload()" class="btn">再読み込み</button>
+</div>
+
+<div id="root"></div>
+
+<script>
+function showError(msg){
+  var ls=document.getElementById('loading-screen');if(ls)ls.style.display='none';
+  var es=document.getElementById('error-screen');if(es)es.classList.add('show');
+  var em=document.getElementById('error-message');if(em)em.textContent=msg;
+}
+window.addEventListener('error',function(e){
+  var msg=(e.message||'')+'\n'+(e.filename||'')+':'+(e.lineno||'');
+  if(e.error&&e.error.stack)msg+='\n'+e.error.stack;
+  showError(msg);
+});
+window.addEventListener('unhandledrejection',function(e){
+  var msg='Promise rejected: '+(e.reason&&e.reason.message?e.reason.message:String(e.reason));
+  if(e.reason&&e.reason.stack)msg+='\n'+e.reason.stack;
+  showError(msg);
+});
+setTimeout(function(){
+  var ls=document.getElementById('loading-screen');
+  if(ls&&ls.style.display!=='none'&&(typeof React==='undefined'||typeof firebase==='undefined')){
+    showError('Firebaseが読み込めませんでした。ネットワークを確認してください。\nReact: '+(typeof React)+'\nFirebase: '+(typeof firebase));
+  }
+},10000);
+</script>
+
+<script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.0/babel.min.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script type="text/babel" data-presets="env,react">
+'use strict';
+
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ============================
+// Firebase
+// ============================
+const firebaseConfig = {
+  apiKey: "AIzaSyDy8W-v6fse33KXgM6OvHF0E5AR_tBoIYA",
+  authDomain: "kintai-app-38587.firebaseapp.com",
+  projectId: "kintai-app-38587",
+  storageBucket: "kintai-app-38587.firebasestorage.app",
+  messagingSenderId: "142298133855",
+  appId: "1:142298133855:web:ca11fca002d2b96a18f2ea"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const DOC_REF = db.collection('kintai_data').doc('main');
+
+// ============================
+// Utilities
+// ============================
+function pad2(n){ return String(n).padStart(2,'0'); }
+function formatDate(d){ d = d || new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function formatMonth(d){ d = d || new Date(); return d.getFullYear()+'-'+pad2(d.getMonth()+1); }
+function formatTime(iso){ if(!iso) return '--:--'; const d = new Date(iso); return pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+function nowISO(){ return new Date().toISOString(); }
+function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+
+function calcWorkMinutes(rec){
+  if(!rec || !rec.clockIn || !rec.clockOut) return 0;
+  const start = new Date(rec.clockIn).getTime();
+  const end = new Date(rec.clockOut).getTime();
+  let breakMs = 0;
+  const breaks = rec.breaks || [];
+  for(let i=0;i<breaks.length;i++){
+    const b = breaks[i];
+    if(b.start && b.end){
+      breakMs += new Date(b.end).getTime() - new Date(b.start).getTime();
+    }
+  }
+  return Math.max(0, Math.floor((end - start - breakMs)/60000));
+}
+
+function minutesToHM(min){
+  const h = Math.floor(min/60); const m = min%60;
+  return h+'時間'+pad2(m)+'分';
+}
+
+function getRecordStatus(rec){
+  if(!rec || !rec.clockIn) return 'not_started';
+  if(rec.clockOut) return 'finished';
+  const breaks = rec.breaks || [];
+  if(breaks.length>0 && !breaks[breaks.length-1].end) return 'on_break';
+  return 'working';
+}
+
+function statusLabel(s){
+  return { not_started:'未出勤', working:'勤務中', on_break:'休憩中', finished:'勤務終了' }[s] || s;
+}
+
+function toLocalInput(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+'T'+pad2(d.getHours())+':'+pad2(d.getMinutes());
+}
+function fromLocalInput(s){ return s ? new Date(s).toISOString() : null; }
+
+// ============================
+// 令和8年 月額表 甲欄 電算機計算特例
+// （扶養親族等の数 = 0、社会保険料控除 = 0 として扱う）
+// ※ 国税庁の計算例で要再検証
+// ============================
+function calcIncomeTax(gross){
+  const A = Math.floor(gross);
+  if(A < 88000) return 0;
+  let tax = 0;
+  if(A < 162500)        tax = (A * 0.06126 - 1560)     * 1.0021;
+  else if(A < 275000)   tax = (A * 0.07143 - 3213)     * 1.0021;
+  else if(A < 579167)   tax = (A * 0.08163 - 6066)     * 1.0021;
+  else if(A < 750000)   tax = (A * 0.11408 - 25793)    * 1.0021;
+  else if(A < 1500000)  tax = (A * 0.20530 - 109280)   * 1.0021;
+  else if(A < 3500000)  tax = (A * 0.23693 - 156776)   * 1.0021;
+  else if(A < 7000000)  tax = (A * 0.40840 - 757071)   * 1.0021;
+  else                  tax = (A * 0.45945 - 1115672)  * 1.0021;
+  return Math.floor(Math.max(0, tax));
+}
+
+function calcPayroll(employee, totalMinutes){
+  if(!employee) return { gross:0, tax:0, net:0, hours:0 };
+  const hours = totalMinutes / 60;
+  const gross = Math.floor(employee.hourlyRate * hours);
+  const tax = calcIncomeTax(gross);
+  return { gross:gross, tax:tax, net:gross - tax, hours:hours };
+}
+
+// ============================
+// State
+// ============================
+const INITIAL_STATE = { employees: [], records: [], currentEmployeeId: null };
+
+function reducer(state, action){
+  switch(action.type){
+    case 'SET_CURRENT':
+      return Object.assign({}, state, { currentEmployeeId: action.id || null });
+    case 'ADD_EMPLOYEE':
+      return Object.assign({}, state, {
+        employees: state.employees.concat([action.employee]),
+        currentEmployeeId: state.currentEmployeeId || action.employee.id
+      });
+    case 'UPDATE_EMPLOYEE':
+      return Object.assign({}, state, {
+        employees: state.employees.map(function(e){
+          return e.id === action.id ? Object.assign({}, e, { name:action.name, hourlyRate:action.hourlyRate }) : e;
+        })
+      });
+    case 'DELETE_EMPLOYEE':
+      return Object.assign({}, state, {
+        employees: state.employees.filter(function(e){ return e.id !== action.id; }),
+        records:   state.records.filter(function(r){ return r.employeeId !== action.id; }),
+        currentEmployeeId: state.currentEmployeeId === action.id ? null : state.currentEmployeeId
+      });
+    case 'ADD_RECORD':
+      return Object.assign({}, state, { records: state.records.concat([action.record]) });
+    case 'UPDATE_RECORD':
+      return Object.assign({}, state, {
+        records: state.records.map(function(r){ return r.id === action.record.id ? action.record : r; })
+      });
+    case 'DELETE_RECORD':
+      return Object.assign({}, state, { records: state.records.filter(function(r){ return r.id !== action.id; }) });
+    default:
+      return state;
+  }
+}
+
+// ============================
+// Components
+// ============================
+function Header({ title }){
+  const [now, setNow] = useState(new Date());
+  useEffect(function(){
+    const t = setInterval(function(){ setNow(new Date()); }, 1000);
+    return function(){ clearInterval(t); };
+  }, []);
+  return (
+    <div className="header">
+      <h1>{title}</h1>
+      <div className="clock">{formatDate(now)} {pad2(now.getHours())}:{pad2(now.getMinutes())}:{pad2(now.getSeconds())}</div>
+    </div>
+  );
+}
+
+function TabNav({ tab, onChange }){
+  const tabs = [
+    { id:'punch',     label:'打刻', icon:'⏱' },
+    { id:'history',   label:'履歴', icon:'📋' },
+    { id:'monthly',   label:'月次', icon:'📊' },
+    { id:'payroll',   label:'給与', icon:'💰' },
+    { id:'employees', label:'社員', icon:'👥' }
+  ];
+  return (
+    <div className="tab-nav">
+      {tabs.map(function(t){
+        return (
+          <button key={t.id} className={tab===t.id?'active':''} onClick={function(){ onChange(t.id); }}>
+            <span className="icon">{t.icon}</span>
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- 打刻 ----
+function PunchScreen({ state, dispatch }){
+  const employees = state.employees, records = state.records, currentEmployeeId = state.currentEmployeeId;
+  const today = formatDate();
+  const todayRec = records.find(function(r){ return r.employeeId === currentEmployeeId && r.date === today; });
+  const status = getRecordStatus(todayRec);
+  const currentEmp = employees.find(function(e){ return e.id === currentEmployeeId; });
+
+  if(employees.length === 0){
+    return (
+      <div className="screen">
+        <div className="card"><p>まず「社員」タブから社員を登録してください。</p></div>
+      </div>
+    );
+  }
+
+  function clockIn(){
+    dispatch({ type:'ADD_RECORD', record:{ id:genId(), employeeId:currentEmployeeId, date:today, clockIn:nowISO(), clockOut:null, breaks:[] } });
+  }
+  function clockOut(){
+    if(!todayRec) return;
+    const breaks = (todayRec.breaks || []).slice();
+    if(breaks.length>0 && !breaks[breaks.length-1].end){
+      breaks[breaks.length-1] = Object.assign({}, breaks[breaks.length-1], { end:nowISO() });
+    }
+    dispatch({ type:'UPDATE_RECORD', record:Object.assign({}, todayRec, { clockOut:nowISO(), breaks:breaks }) });
+  }
+  function breakStart(){
+    if(!todayRec) return;
+    const breaks = (todayRec.breaks || []).slice();
+    breaks.push({ start:nowISO(), end:null });
+    dispatch({ type:'UPDATE_RECORD', record:Object.assign({}, todayRec, { breaks:breaks }) });
+  }
+  function breakEnd(){
+    if(!todayRec) return;
+    const breaks = (todayRec.breaks || []).slice();
+    if(breaks.length>0 && !breaks[breaks.length-1].end){
+      breaks[breaks.length-1] = Object.assign({}, breaks[breaks.length-1], { end:nowISO() });
+    }
+    dispatch({ type:'UPDATE_RECORD', record:Object.assign({}, todayRec, { breaks:breaks }) });
+  }
+
+  return (
+    <div className="screen">
+      <div className="card">
+        <label className="muted">勤怠を入力する社員</label>
+        <select className="select" value={currentEmployeeId || ''} onChange={function(e){ dispatch({ type:'SET_CURRENT', id:e.target.value }); }}>
+          <option value="">-- 選択 --</option>
+          {employees.map(function(emp){ return <option key={emp.id} value={emp.id}>{emp.name}</option>; })}
+        </select>
+      </div>
+
+      {currentEmp ? (
+        <React.Fragment>
+          <div className={'status '+status}>{statusLabel(status)}</div>
+
+          <div className="card">
+            <div className="row">
+              <div><div className="muted">出勤</div><div style={{fontSize:18,fontWeight:'bold'}}>{formatTime(todayRec && todayRec.clockIn)}</div></div>
+              <div><div className="muted">退勤</div><div style={{fontSize:18,fontWeight:'bold'}}>{formatTime(todayRec && todayRec.clockOut)}</div></div>
+            </div>
+            {todayRec && todayRec.breaks && todayRec.breaks.length > 0 ? (
+              <div style={{marginTop:12}}>
+                <div className="muted">休憩</div>
+                {todayRec.breaks.map(function(b, i){
+                  return <div key={i}>{formatTime(b.start)} 〜 {formatTime(b.end)}</div>;
+                })}
+              </div>
+            ) : null}
+            {status === 'finished' ? (
+              <div style={{marginTop:12}}>
+                <div className="muted">勤務時間</div>
+                <div style={{fontSize:20,fontWeight:'bold'}}>{minutesToHM(calcWorkMinutes(todayRec))}</div>
+              </div>
+            ) : null}
+          </div>
+
+          <button className="btn success" disabled={status !== 'not_started'} onClick={clockIn}>出勤</button>
+          <button className="btn warning" disabled={status !== 'working'} onClick={breakStart}>休憩開始</button>
+          <button className="btn warning" disabled={status !== 'on_break'} onClick={breakEnd}>休憩終了</button>
+          <button className="btn danger" disabled={status === 'not_started' || status === 'finished'} onClick={clockOut}>退勤</button>
+        </React.Fragment>
+      ) : null}
+    </div>
+  );
+}
+
+// ---- 履歴 ----
+function HistoryScreen({ state, dispatch }){
+  const employees = state.employees, records = state.records;
+  const [filterEmp, setFilterEmp] = useState('');
+  const [filterMonth, setFilterMonth] = useState(formatMonth());
+  const [editId, setEditId] = useState(null);
+
+  const filtered = records
+    .filter(function(r){ return !filterEmp || r.employeeId === filterEmp; })
+    .filter(function(r){ return r.date.startsWith(filterMonth); })
+    .sort(function(a,b){
+      if(a.date !== b.date) return b.date.localeCompare(a.date);
+      return (b.clockIn||'').localeCompare(a.clockIn||'');
+    });
+
+  return (
+    <div className="screen">
+      <div className="card">
+        <label className="muted">月</label>
+        <input type="month" className="input" value={filterMonth} onChange={function(e){ setFilterMonth(e.target.value); }} />
+        <label className="muted">社員</label>
+        <select className="select" value={filterEmp} onChange={function(e){ setFilterEmp(e.target.value); }}>
+          <option value="">全員</option>
+          {employees.map(function(emp){ return <option key={emp.id} value={emp.id}>{emp.name}</option>; })}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? <div className="card"><p className="muted">記録なし</p></div> : null}
+
+      {filtered.map(function(r){
+        const emp = employees.find(function(e){ return e.id === r.employeeId; });
+        if(editId === r.id){
+          return (
+            <EditRecord
+              key={r.id}
+              record={r}
+              employee={emp}
+              onSave={function(updated){ dispatch({ type:'UPDATE_RECORD', record:updated }); setEditId(null); }}
+              onCancel={function(){ setEditId(null); }}
+              onDelete={function(){
+                if(confirm('この記録を削除しますか?')){
+                  dispatch({ type:'DELETE_RECORD', id:r.id });
+                  setEditId(null);
+                }
+              }}
+            />
+          );
+        }
+        const mins = calcWorkMinutes(r);
+        return (
+          <div key={r.id} className="card">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontWeight:'bold'}}>{r.date}</div>
+                {emp ? <div className="muted">{emp.name}</div> : null}
+              </div>
+              <button className="btn small secondary" onClick={function(){ setEditId(r.id); }}>編集</button>
+            </div>
+            <div style={{marginTop:8}}>
+              <div>出勤 {formatTime(r.clockIn)} ／ 退勤 {formatTime(r.clockOut)}</div>
+              {r.breaks && r.breaks.length>0 ? (
+                <div className="muted">休憩 {r.breaks.map(function(b){ return formatTime(b.start)+'〜'+formatTime(b.end); }).join(', ')}</div>
+              ) : null}
+              {mins>0 ? <div style={{marginTop:4}}>勤務 <strong>{minutesToHM(mins)}</strong></div> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EditRecord({ record, employee, onSave, onCancel, onDelete }){
+  const [date, setDate] = useState(record.date);
+  const [clockIn, setClockIn] = useState(record.clockIn ? toLocalInput(record.clockIn) : '');
+  const [clockOut, setClockOut] = useState(record.clockOut ? toLocalInput(record.clockOut) : '');
+  const [breaks, setBreaks] = useState((record.breaks || []).map(function(b){
+    return { start: b.start ? toLocalInput(b.start) : '', end: b.end ? toLocalInput(b.end) : '' };
+  }));
+
+  function save(){
+    onSave(Object.assign({}, record, {
+      date: date,
+      clockIn: fromLocalInput(clockIn),
+      clockOut: fromLocalInput(clockOut),
+      breaks: breaks.map(function(b){ return { start:fromLocalInput(b.start), end:fromLocalInput(b.end) }; })
+    }));
+  }
+
+  function updateBreak(i, field, value){
+    const next = breaks.slice();
+    next[i] = Object.assign({}, next[i], { [field]: value });
+    setBreaks(next);
+  }
+
+  return (
+    <div className="card">
+      <div style={{fontWeight:'bold',marginBottom:8}}>編集中{employee ? '：'+employee.name : ''}</div>
+      <label className="muted">日付</label>
+      <input type="date" className="input" value={date} onChange={function(e){ setDate(e.target.value); }} />
+      <label className="muted">出勤</label>
+      <input type="datetime-local" className="input" value={clockIn} onChange={function(e){ setClockIn(e.target.value); }} />
+      <label className="muted">退勤</label>
+      <input type="datetime-local" className="input" value={clockOut} onChange={function(e){ setClockOut(e.target.value); }} />
+      <label className="muted">休憩</label>
+      {breaks.map(function(b, i){
+        return (
+          <div key={i} style={{marginBottom:8,padding:8,border:'1px solid #e5e7eb',borderRadius:8}}>
+            <input type="datetime-local" className="input" value={b.start} onChange={function(e){ updateBreak(i,'start',e.target.value); }} />
+            <input type="datetime-local" className="input" value={b.end} onChange={function(e){ updateBreak(i,'end',e.target.value); }} />
+            <button className="btn small danger" onClick={function(){ setBreaks(breaks.filter(function(_,j){ return j!==i; })); }}>この休憩を削除</button>
+          </div>
+        );
+      })}
+      <button className="btn small secondary" onClick={function(){ setBreaks(breaks.concat([{ start:'', end:'' }])); }}>休憩を追加</button>
+      <div className="btn-row" style={{marginTop:12}}>
+        <button className="btn" onClick={save}>保存</button>
+        <button className="btn secondary" onClick={onCancel}>キャンセル</button>
+      </div>
+      <button className="btn danger" onClick={onDelete}>この記録を削除</button>
+    </div>
+  );
+}
+
+// ---- 月次 ----
+function MonthlyScreen({ state }){
+  const employees = state.employees, records = state.records;
+  const [month, setMonth] = useState(formatMonth());
+
+  const rows = employees.map(function(emp){
+    const recs = records.filter(function(r){ return r.employeeId === emp.id && r.date.startsWith(month); });
+    let totalMin = 0, workDays = 0;
+    recs.forEach(function(r){
+      const m = calcWorkMinutes(r);
+      if(m>0){ totalMin += m; workDays++; }
+    });
+    return { emp:emp, totalMin:totalMin, workDays:workDays };
+  });
+
+  return (
+    <div className="screen">
+      <div className="card">
+        <label className="muted">月</label>
+        <input type="month" className="input" value={month} onChange={function(e){ setMonth(e.target.value); }} />
+      </div>
+      {rows.length === 0 ? <div className="card"><p className="muted">社員未登録</p></div> : null}
+      {rows.map(function(row){
+        return (
+          <div key={row.emp.id} className="card">
+            <div style={{fontWeight:'bold',fontSize:16}}>{row.emp.name}</div>
+            <div className="muted">時給 {row.emp.hourlyRate.toLocaleString()}円</div>
+            <div style={{marginTop:8}}>
+              <div>勤務日数 <strong>{row.workDays}日</strong></div>
+              <div>勤務時間 <strong>{minutesToHM(row.totalMin)}</strong>（{(row.totalMin/60).toFixed(2)}時間）</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- 給与 ----
+function PayrollScreen({ state }){
+  const employees = state.employees, records = state.records;
+  const [month, setMonth] = useState(formatMonth());
+
+  const rows = employees.map(function(emp){
+    const recs = records.filter(function(r){ return r.employeeId === emp.id && r.date.startsWith(month); });
+    let totalMin = 0;
+    recs.forEach(function(r){ totalMin += calcWorkMinutes(r); });
+    return { emp:emp, totalMin:totalMin, pay:calcPayroll(emp, totalMin) };
+  });
+
+  return (
+    <div className="screen">
+      <div className="card">
+        <label className="muted">月</label>
+        <input type="month" className="input" value={month} onChange={function(e){ setMonth(e.target.value); }} />
+        <div className="muted" style={{marginTop:4,fontSize:11}}>令和8年 月額表 甲欄（扶養0人・社保控除0）</div>
+      </div>
+      {rows.length === 0 ? <div className="card"><p className="muted">社員未登録</p></div> : null}
+      {rows.map(function(row){
+        return (
+          <div key={row.emp.id} className="card">
+            <div style={{fontWeight:'bold',fontSize:16}}>{row.emp.name}</div>
+            <div className="muted">時給 {row.emp.hourlyRate.toLocaleString()}円 × {row.pay.hours.toFixed(2)}時間</div>
+            <table style={{marginTop:8}}>
+              <tbody>
+                <tr><td>総支給額</td><td style={{textAlign:'right'}}>{row.pay.gross.toLocaleString()}円</td></tr>
+                <tr><td>所得税</td><td style={{textAlign:'right',color:'#dc2626'}}>-{row.pay.tax.toLocaleString()}円</td></tr>
+                <tr style={{fontWeight:'bold',fontSize:15}}><td>差引手取り</td><td style={{textAlign:'right'}}>{row.pay.net.toLocaleString()}円</td></tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- 社員管理 ----
+function EmployeesScreen({ state, dispatch }){
+  const [unlocked, setUnlocked] = useState(false);
+  const [pwd, setPwd] = useState('');
+  const [name, setName] = useState('');
+  const [rate, setRate] = useState('');
+  const [editId, setEditId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editRate, setEditRate] = useState('');
+
+  if(!unlocked){
+    return (
+      <div className="screen">
+        <div className="card">
+          <div style={{fontWeight:'bold',marginBottom:8}}>🔒 管理パスワード</div>
+          <input
+            type="password"
+            inputMode="numeric"
+            className="input"
+            value={pwd}
+            onChange={function(e){ setPwd(e.target.value); }}
+            placeholder="****"
+          />
+          <button className="btn" onClick={function(){
+            if(pwd === '1234'){ setUnlocked(true); setPwd(''); }
+            else { alert('パスワードが違います'); }
+          }}>解除</button>
+        </div>
+      </div>
+    );
+  }
+
+  function add(){
+    if(!name.trim() || !rate){ alert('名前と時給を入力してください'); return; }
+    dispatch({ type:'ADD_EMPLOYEE', employee:{ id:genId(), name:name.trim(), hourlyRate:parseInt(rate,10), createdAt:nowISO() } });
+    setName(''); setRate('');
+  }
+
+  function startEdit(emp){ setEditId(emp.id); setEditName(emp.name); setEditRate(String(emp.hourlyRate)); }
+  function saveEdit(){
+    if(!editName.trim() || !editRate){ alert('名前と時給を入力してください'); return; }
+    dispatch({ type:'UPDATE_EMPLOYEE', id:editId, name:editName.trim(), hourlyRate:parseInt(editRate,10) });
+    setEditId(null);
+  }
+
+  return (
+    <div className="screen">
+      <div className="card">
+        <div style={{fontWeight:'bold',marginBottom:8}}>社員追加</div>
+        <input className="input" placeholder="名前" value={name} onChange={function(e){ setName(e.target.value); }} />
+        <input className="input" inputMode="numeric" placeholder="時給（円）" value={rate} onChange={function(e){ setRate(e.target.value.replace(/[^0-9]/g,'')); }} />
+        <button className="btn" onClick={add}>追加</button>
+      </div>
+
+      {state.employees.length === 0 ? <div className="card"><p className="muted">社員未登録</p></div> : null}
+
+      {state.employees.map(function(emp){
+        if(editId === emp.id){
+          return (
+            <div key={emp.id} className="card">
+              <input className="input" value={editName} onChange={function(e){ setEditName(e.target.value); }} />
+              <input className="input" inputMode="numeric" value={editRate} onChange={function(e){ setEditRate(e.target.value.replace(/[^0-9]/g,'')); }} />
+              <div className="btn-row">
+                <button className="btn" onClick={saveEdit}>保存</button>
+                <button className="btn secondary" onClick={function(){ setEditId(null); }}>キャンセル</button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div key={emp.id} className="card">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontWeight:'bold',fontSize:16}}>{emp.name}</div>
+                <div className="muted">時給 {emp.hourlyRate.toLocaleString()}円</div>
+              </div>
+              <div style={{display:'flex',gap:4}}>
+                <button className="btn small secondary" onClick={function(){ startEdit(emp); }}>編集</button>
+                <button className="btn small danger" onClick={function(){
+                  if(confirm(emp.name+' を削除しますか?（関連記録も全削除）')){
+                    dispatch({ type:'DELETE_EMPLOYEE', id:emp.id });
+                  }
+                }}>削除</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================
+// App
+// ============================
+function App(){
+  const [state, setState] = useState(INITIAL_STATE);
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState('punch');
+
+  useEffect(function(){
+    const unsub = DOC_REF.onSnapshot(function(snap){
+      if(snap.exists){
+        const data = snap.data();
+        if(data && data.payload){
+          setState(Object.assign({}, INITIAL_STATE, data.payload));
+        }
+      } else {
+        DOC_REF.set({ payload:INITIAL_STATE, updatedAt:nowISO() });
+      }
+      setLoaded(true);
+    }, function(err){
+      throw new Error('Firestore subscribe error: '+err.message);
+    });
+    return function(){ unsub(); };
+  }, []);
+
+  useEffect(function(){
+    if(loaded){
+      const ls = document.getElementById('loading-screen');
+      if(ls) ls.style.display = 'none';
+    }
+  }, [loaded]);
+
+  const dispatch = useCallback(function(action){
+    setState(function(prev){
+      const next = reducer(prev, action);
+      DOC_REF.set({ payload:next, updatedAt:nowISO() }).catch(function(err){
+        console.error('Firestore write error:', err);
+      });
+      return next;
+    });
+  }, []);
+
+  const titles = { punch:'打刻', history:'履歴', monthly:'月次集計', payroll:'給与計算', employees:'社員管理' };
+
+  let screen = null;
+  if(tab === 'punch')          screen = <PunchScreen state={state} dispatch={dispatch} />;
+  else if(tab === 'history')   screen = <HistoryScreen state={state} dispatch={dispatch} />;
+  else if(tab === 'monthly')   screen = <MonthlyScreen state={state} />;
+  else if(tab === 'payroll')   screen = <PayrollScreen state={state} />;
+  else if(tab === 'employees') screen = <EmployeesScreen state={state} dispatch={dispatch} />;
+
+  return (
+    <React.Fragment>
+      <Header title={titles[tab]} />
+      {screen}
+      <TabNav tab={tab} onChange={setTab} />
+    </React.Fragment>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+
+</body>
+</html>
 
