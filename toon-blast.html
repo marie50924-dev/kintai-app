@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>ブラストパズル</title>
+<style>
+  :root{
+    --bg1:#1b1140;
+    --bg2:#3b1c6b;
+    --panel:rgba(255,255,255,.12);
+    --panel-line:rgba(255,255,255,.22);
+    --text:#fff;
+    --accent:#ffd23f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+    font-weight:800;
+    color:var(--text);
+    background:
+      radial-gradient(120% 80% at 50% 0%, #5a2b9c 0%, transparent 60%),
+      linear-gradient(180deg, var(--bg1), var(--bg2));
+    background-attachment:fixed;
+    display:flex;
+    justify-content:center;
+    overflow-x:hidden;
+    user-select:none;
+  }
+  #app{
+    width:100%;
+    max-width:520px;
+    padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud{display:flex;flex-direction:column;gap:8px}
+  .row{display:flex;gap:8px;align-items:stretch}
+  .card{
+    background:var(--panel);
+    border:2px solid var(--panel-line);
+    border-radius:16px;
+    padding:8px 12px;
+    backdrop-filter:blur(6px);
+  }
+  .stat{flex:1;text-align:center;line-height:1.15}
+  .stat .k{font-size:11px;opacity:.75;letter-spacing:.08em}
+  .stat .v{font-size:22px;font-variant-numeric:tabular-nums}
+  #moves.low .v{color:#ff6b7a}
+
+  #goals{flex:1;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+  .goal{display:flex;align-items:center;gap:6px;font-size:18px;font-variant-numeric:tabular-nums}
+  .goal .chip{
+    width:26px;height:26px;border-radius:8px;
+    box-shadow:inset 0 -4px 0 rgba(0,0,0,.28), inset 0 3px 0 rgba(255,255,255,.45);
+  }
+  .goal.done{opacity:.45}
+  .goal.done .n::after{content:"✓";margin-left:2px}
+  .goal.done .n{color:#7dff9e}
+
+  /* ---------- board ---------- */
+  #boardWrap{position:relative;align-self:center;border-radius:22px}
+  canvas{
+    display:block;
+    border-radius:22px;
+    background:rgba(0,0,0,.28);
+    box-shadow:0 12px 40px rgba(0,0,0,.45), inset 0 0 0 2px rgba(255,255,255,.14);
+    touch-action:none;
+  }
+
+  /* ---------- overlay ---------- */
+  #overlay{
+    position:absolute;inset:0;
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    border-radius:22px;
+    background:rgba(20,8,44,.82);
+    backdrop-filter:blur(4px);
+    text-align:center;
+    padding:20px;
+  }
+  #overlay.show{display:flex;animation:pop .25s ease-out}
+  @keyframes pop{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+  #ovTitle{font-size:30px;letter-spacing:.02em}
+  #ovBody{font-size:15px;opacity:.85;font-weight:700;line-height:1.6}
+  .btn{
+    border:none;
+    border-radius:16px;
+    padding:13px 30px;
+    font:inherit;
+    font-size:18px;
+    color:#3a1a00;
+    background:linear-gradient(180deg,#ffe07a,var(--accent));
+    box-shadow:0 5px 0 #c99400, 0 8px 18px rgba(0,0,0,.35);
+    cursor:pointer;
+  }
+  .btn:active{transform:translateY(3px);box-shadow:0 2px 0 #c99400}
+  .btn.ghost{
+    background:rgba(255,255,255,.14);
+    color:#fff;
+    box-shadow:0 5px 0 rgba(0,0,0,.25);
+  }
+  .btn.ghost:active{box-shadow:0 2px 0 rgba(0,0,0,.25)}
+
+  /* ---------- footer ---------- */
+  #foot{display:flex;gap:8px;align-items:center}
+  #hint{flex:1;font-size:12px;font-weight:700;opacity:.7;line-height:1.5}
+  .icobtn{
+    width:44px;height:44px;flex:none;
+    border-radius:14px;border:2px solid var(--panel-line);
+    background:var(--panel);color:#fff;font-size:19px;cursor:pointer;
+  }
+  .icobtn:active{transform:scale(.94)}
+  .icobtn.off{opacity:.4}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="hud">
+    <div class="row">
+      <div class="card stat"><div class="k">レベル</div><div class="v" id="lvVal">1</div></div>
+      <div class="card stat" id="moves"><div class="k">のこり手数</div><div class="v" id="mvVal">25</div></div>
+      <div class="card stat"><div class="k">スコア</div><div class="v" id="scVal">0</div></div>
+    </div>
+    <div class="row">
+      <div class="card" id="goals"></div>
+    </div>
+  </div>
+
+  <div id="boardWrap">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <div id="ovTitle"></div>
+      <div id="ovBody"></div>
+      <button class="btn" id="ovBtn"></button>
+      <button class="btn ghost" id="ovBtn2">最初から</button>
+    </div>
+  </div>
+
+  <div id="foot">
+    <div id="hint">同じ色が2つ以上つながっているところをタップ！<br>たくさん消すとロケット・爆弾・レインボーが出ます。</div>
+    <button class="icobtn" id="sndBtn" title="サウンド">♪</button>
+    <button class="icobtn" id="rstBtn" title="やり直す">↻</button>
+  </div>
+
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ============================================================
+   定数
+   ============================================================ */
+const COLS = 9, ROWS = 9;
+
+const PALETTE = [
+  { base:'#ff4f5e', light:'#ff97a1', dark:'#c31f37' },
+  { base:'#37a9ff', light:'#93d5ff', dark:'#0d63c2' },
+  { base:'#48cf67', light:'#9ceaad', dark:'#15913f' },
+  { base:'#ffcc33', light:'#ffe795', dark:'#cf8b00' },
+  { base:'#b06cff', light:'#d8b3ff', dark:'#6d21c6' },
+  { base:'#2fd8d0', light:'#95efeb', dark:'#0b918b' },
+];
+
+const T_CUBE='cube', T_ROCKET_H='rocketH', T_ROCKET_V='rocketV', T_BOMB='bomb', T_RAINBOW='rainbow';
+
+const POP_TIME   = 0.17;   // 消えるアニメの長さ(秒)
+const CHAIN_STEP = 0.035;  // 連鎖爆発の1マスあたりの遅延(秒)
+const BOMB_R     = 2;      // 爆弾の半径(マス)
+
+/* 消した数 → 生成されるブースター */
+function boosterFor(n){
+  if (n >= 10) return T_RAINBOW;
+  if (n >= 8)  return T_BOMB;
+  if (n >= 5)  return Math.random() < 0.5 ? T_ROCKET_H : T_ROCKET_V;
+  return null;
+}
+
+/* ============================================================
+   DOM
+   ============================================================ */
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+const elLv   = document.getElementById('lvVal');
+const elMv   = document.getElementById('mvVal');
+const elSc   = document.getElementById('scVal');
+const elMvBox= document.getElementById('moves');
+const elGoals= document.getElementById('goals');
+const ov     = document.getElementById('overlay');
+const ovTitle= document.getElementById('ovTitle');
+const ovBody = document.getElementById('ovBody');
+const ovBtn  = document.getElementById('ovBtn');
+const ovBtn2 = document.getElementById('ovBtn2');
+
+/* ============================================================
+   状態
+   ============================================================ */
+let CELL = 44;
+let grid = [];            // grid[row][col] = Block | null
+let particles = [];
+let floaters = [];
+let pending = [];         // 連鎖待ちのブースター {block, t}
+let busy = false;         // アニメ中は入力を止める
+let gravityDirty = false;
+let shake = 0;
+let level = 1, moves = 0, score = 0, colorCount = 4;
+let goals = [];           // {ci, need, got}
+let finished = false;     // クリア/ゲームオーバー表示中
+
+/* ============================================================
+   ユーティリティ
+   ============================================================ */
+const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+const inBoard = (r,c) => r>=0 && r<ROWS && c>=0 && c<COLS;
+
+function roundRect(x,y,w,h,r){
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x,   y+h, rr);
+  ctx.arcTo(x,   y+h, x,   y,   rr);
+  ctx.arcTo(x,   y,   x+w, y,   rr);
+  ctx.closePath();
+}
+
+/* ============================================================
+   サウンド (WebAudio・ファイル不要)
+   ============================================================ */
+let actx = null, soundOn = true;
+function beep(freq, dur, type='sine', vol=0.06){
+  if (!soundOn) return;
+  try{
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(freq*1.5, actx.currentTime + dur);
+    g.gain.setValueAtTime(vol, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+    o.connect(g).connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + dur);
+  }catch(e){/* 音は出なくてもゲームは続行 */}
+}
+
+/* ============================================================
+   ブロック
+   ============================================================ */
+function makeBlock(row, col, ci, type){
+  return {
+    row, col,
+    ci: (ci !== undefined ? ci : (Math.random()*colorCount|0)),
+    type: type || T_CUBE,
+    y: row * CELL,          // 画面上のY(px)
+    vy: 0,
+    targetY: row * CELL,
+    popping: false,         // 消滅が確定している
+    popDelay: 0,            // 消え始めるまでの待ち(秒)
+    popT: 0,                // 消滅アニメの経過(秒)
+    squash: 0,              // 着地のつぶれ
+    spin: 0,                // レインボー用
+    triggered: false,
+  };
+}
+
+/* ============================================================
+   盤面の生成
+   ============================================================ */
+function buildLevel(){
+  colorCount = clamp(4 + Math.floor((level-1)/3), 4, 6);
+  moves = clamp(28 - Math.floor((level-1)/2), 16, 28);
+  score = (level === 1) ? 0 : score;
+
+  // 目標: 色を2〜3種類、レベルに応じて個数が増える
+  const nGoals = level < 3 ? 2 : 3;
+  const pick = [];
+  while (pick.length < nGoals){
+    const ci = Math.random()*colorCount|0;
+    if (!pick.includes(ci)) pick.push(ci);
+  }
+  goals = pick.map(ci => ({ ci, need: 22 + level*4 + (Math.random()*8|0), got: 0 }));
+
+  grid = [];
+  for (let r=0;r<ROWS;r++){
+    grid[r] = [];
+    for (let c=0;c<COLS;c++) grid[r][c] = makeBlock(r,c);
+  }
+  particles.length = 0; floaters.length = 0; pending.length = 0;
+  busy = false; gravityDirty = false; finished = false;
+  ensureMoves();
+  syncHUD();
+}
+
+/* ============================================================
+   同色のかたまりを探す (4方向)
+   ============================================================ */
+function findGroup(row, col){
+  const start = grid[row][col];
+  if (!start || start.type !== T_CUBE || start.popping) return [];
+  const ci = start.ci;
+  const seen = new Set([row*COLS+col]);
+  const out = [], stack = [[row,col]];
+  while (stack.length){
+    const [r,c] = stack.pop();
+    out.push(grid[r][c]);
+    const nb = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+    for (const [nr,nc] of nb){
+      if (!inBoard(nr,nc)) continue;
+      const key = nr*COLS+nc;
+      if (seen.has(key)) continue;
+      const b = grid[nr][nc];
+      if (!b || b.type !== T_CUBE || b.ci !== ci || b.popping) continue;
+      seen.add(key);
+      stack.push([nr,nc]);
+    }
+  }
+  return out;
+}
+
+/* 手詰まりなら色を振り直す */
+function ensureMoves(){
+  for (let tries=0; tries<40; tries++){
+    let ok = false;
+    outer:
+    for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+      const b = grid[r][c];
+      if (!b) continue;
+      if (b.type !== T_CUBE){ ok = true; break outer; }
+      if (findGroup(r,c).length >= 2){ ok = true; break outer; }
+    }
+    if (ok) return;
+    for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+      const b = grid[r][c];
+      if (b && b.type === T_CUBE) b.ci = Math.random()*colorCount|0;
+    }
+  }
+}
+
+/* ============================================================
+   消す処理
+   ============================================================ */
+function popBlock(b, delay){
+  if (!b || b.popping) return;
+  b.popping = true;
+  b.popDelay = delay || 0;
+  b.popT = 0;
+  gravityDirty = true;
+  if (b.type === T_CUBE){
+    const g = goals.find(g => g.ci === b.ci);
+    if (g && g.got < g.need) g.got++;
+  }
+}
+
+function burst(b, count, color){
+  const cx = b.col*CELL + CELL/2, cy = b.y + CELL/2;
+  for (let i=0;i<count;i++){
+    const a = Math.random()*Math.PI*2, sp = 60 + Math.random()*220;
+    particles.push({
+      x:cx, y:cy,
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - 60,
+      life:0.45+Math.random()*0.35, age:0,
+      size:3+Math.random()*(CELL*0.16),
+      color: color || PALETTE[b.ci].base,
+    });
+  }
+}
+
+/* セルを消す。ブースターなら連鎖キューに積む */
+function clearCell(r, c, delay){
+  if (!inBoard(r,c)) return;
+  const b = grid[r][c];
+  if (!b || b.popping) return;
+  if (b.type !== T_CUBE){
+    // ブースターは即消しせず、少し遅れて発動させて連鎖にする
+    if (!b.triggered){
+      b.triggered = true;
+      pending.push({ block:b, t:delay });
+    }
+    return;
+  }
+  popBlock(b, delay);
+  burst(b, 6);
+}
+
+/* ブースター発動 */
+function triggerBooster(b){
+  b.triggered = true;
+  const r = b.row, c = b.col;
+  popBlock(b, 0);
+  burst(b, 16, '#ffffff');
+
+  if (b.type === T_ROCKET_H){
+    beep(680, .28, 'sawtooth', .05);
+    for (let i=1;i<COLS;i++){
+      clearCell(r, c-i, i*CHAIN_STEP);
+      clearCell(r, c+i, i*CHAIN_STEP);
+    }
+    shake = Math.max(shake, 0.18);
+  } else if (b.type === T_ROCKET_V){
+    beep(760, .28, 'sawtooth', .05);
+    for (let i=1;i<ROWS;i++){
+      clearCell(r-i, c, i*CHAIN_STEP);
+      clearCell(r+i, c, i*CHAIN_STEP);
+    }
+    shake = Math.max(shake, 0.18);
+  } else if (b.type === T_BOMB){
+    beep(120, .38, 'square', .09);
+    for (let dr=-BOMB_R; dr<=BOMB_R; dr++)
+      for (let dc=-BOMB_R; dc<=BOMB_R; dc++){
+        if (Math.abs(dr)+Math.abs(dc) > BOMB_R+1) continue;
+        const d = Math.hypot(dr,dc);
+        clearCell(r+dr, c+dc, d*CHAIN_STEP*1.4);
+      }
+    shake = Math.max(shake, 0.42);
+  } else if (b.type === T_RAINBOW){
+    beep(980, .5, 'triangle', .07);
+    // 盤面でいちばん多い色を全部消す
+    const tally = new Array(colorCount).fill(0);
+    for (let rr=0;rr<ROWS;rr++) for (let cc=0;cc<COLS;cc++){
+      const x = grid[rr][cc];
+      if (x && x.type === T_CUBE && !x.popping) tally[x.ci]++;
+    }
+    let best = 0;
+    for (let i=1;i<colorCount;i++) if (tally[i] > tally[best]) best = i;
+    for (let rr=0;rr<ROWS;rr++) for (let cc=0;cc<COLS;cc++){
+      const x = grid[rr][cc];
+      if (x && x.type === T_CUBE && x.ci === best)
+        clearCell(rr, cc, Math.hypot(rr-r, cc-c)*CHAIN_STEP);
+    }
+    shake = Math.max(shake, 0.3);
+  }
+}
+
+/* ============================================================
+   落下と補充
+   ============================================================ */
+function applyGravity(){
+  for (let c=0;c<COLS;c++){
+    let write = ROWS-1;
+    for (let r=ROWS-1;r>=0;r--){
+      const b = grid[r][c];
+      if (!b) continue;
+      if (r !== write){ grid[write][c] = b; grid[r][c] = null; b.row = write; }
+      b.targetY = write * CELL;
+      write--;
+    }
+    let n = 0;
+    for (let r=write;r>=0;r--){
+      const b = makeBlock(r, c);
+      b.y = -CELL*(n+1) - CELL*0.4;
+      b.targetY = r*CELL;
+      grid[r][c] = b;
+      n++;
+    }
+  }
+}
+
+/* ============================================================
+   入力
+   ============================================================ */
+function onTap(px, py){
+  if (busy || finished) return;
+  const c = Math.floor(px / CELL), r = Math.floor(py / CELL);
+  if (!inBoard(r,c)) return;
+  const b = grid[r][c];
+  if (!b || b.popping) return;
+
+  if (b.type !== T_CUBE){
+    moves--;
+    triggerBooster(b);
+    busy = true;
+    syncHUD();
+    return;
+  }
+
+  const group = findGroup(r,c);
+  if (group.length < 2){
+    b.squash = 0.5;                 // 「消せないよ」のリアクション
+    beep(180, .08, 'square', .03);
+    return;
+  }
+
+  moves--;
+  const bt = boosterFor(group.length);
+  const gained = group.length * 30 + (group.length >= 5 ? group.length*20 : 0);
+  score += gained;
+
+  for (const g of group){
+    if (bt && g.row === r && g.col === c) continue;   // ブースターになるマスは残す
+    popBlock(g, Math.hypot(g.row-r, g.col-c)*0.018);
+    burst(g, group.length >= 5 ? 8 : 5);
+  }
+
+  if (bt){
+    const nb = grid[r][c];
+    nb.type = bt;
+    nb.squash = 0.6;
+    beep(880, .22, 'triangle', .06);
+  } else {
+    beep(300 + Math.min(group.length,10)*45, .12, 'sine', .05);
+  }
+
+  floaters.push({
+    x: c*CELL + CELL/2, y: r*CELL + CELL/2,
+    text: '+' + gained, age: 0, life: 0.85,
+    color: PALETTE[b.ci].light,
+  });
+
+  if (group.length >= 8) shake = Math.max(shake, 0.22);
+  busy = true;
+  syncHUD();
+}
+
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  onTap(
+    (e.clientX - rect.left) * (COLS*CELL / rect.width),
+    (e.clientY - rect.top)  * (ROWS*CELL / rect.height)
+  );
+});
+
+/* ============================================================
+   更新
+   ============================================================ */
+function update(dt){
+  const G = CELL * 62;
+  let anyPop = false, anyFall = false;
+
+  // 連鎖待ちのブースター
+  for (let i=pending.length-1;i>=0;i--){
+    pending[i].t -= dt;
+    if (pending[i].t <= 0){
+      const b = pending[i].block;
+      pending.splice(i,1);
+      if (!b.popping) triggerBooster(b);
+    }
+  }
+
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+    const b = grid[r][c];
+    if (!b) continue;
+
+    if (b.popping){
+      anyPop = true;
+      if (b.popDelay > 0){ b.popDelay -= dt; continue; }
+      b.popT += dt;
+      if (b.popT >= POP_TIME){ grid[r][c] = null; gravityDirty = true; }
+      continue;
+    }
+
+    // 落下
+    if (b.y < b.targetY - 0.5){
+      b.vy += G*dt;
+      b.y += b.vy*dt;
+      if (b.y >= b.targetY){
+        b.squash = Math.min(0.75, b.vy / (CELL*34));
+        b.y = b.targetY; b.vy = 0;
+      }
+      anyFall = true;
+    } else {
+      b.y = b.targetY;
+    }
+
+    if (b.squash > 0) b.squash = Math.max(0, b.squash - dt*3.2);
+    if (b.type === T_RAINBOW) b.spin += dt*2.2;
+  }
+
+  if (!anyPop && pending.length === 0 && gravityDirty){
+    applyGravity();
+    gravityDirty = false;
+    anyFall = true;
+  }
+
+  if (busy && !anyPop && !anyFall && pending.length === 0 && !gravityDirty){
+    busy = false;
+    ensureMoves();
+    checkEnd();
+  }
+
+  // パーティクル
+  for (let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.age += dt;
+    if (p.age >= p.life){ particles.splice(i,1); continue; }
+    p.vy += CELL*24*dt;
+    p.x += p.vx*dt; p.y += p.vy*dt;
+  }
+  for (let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i];
+    f.age += dt; f.y -= dt*46;
+    if (f.age >= f.life) floaters.splice(i,1);
+  }
+  if (shake > 0) shake = Math.max(0, shake - dt*1.6);
+}
+
+/* ============================================================
+   終了判定
+   ============================================================ */
+function checkEnd(){
+  if (finished) return;
+  const cleared = goals.every(g => g.got >= g.need);
+  if (cleared){
+    finished = true;
+    score += moves * 120;         // 残り手数ボーナス
+    syncHUD();
+    beep(660,.15,'triangle',.07);
+    setTimeout(()=>beep(880,.25,'triangle',.07),140);
+    showOverlay('レベル ' + level + ' クリア！',
+      '残り手数ボーナス +' + (moves*120) + '<br>スコア ' + score,
+      '次のレベルへ', () => { level++; buildLevel(); hideOverlay(); });
+  } else if (moves <= 0){
+    finished = true;
+    beep(200,.4,'sawtooth',.07);
+    showOverlay('てづまり…',
+      'ゴールまであと ' + goals.reduce((a,g)=>a+Math.max(0,g.need-g.got),0) + ' 個！',
+      'もう一度', () => { buildLevel(); hideOverlay(); });
+  }
+}
+
+function showOverlay(title, body, btn, fn){
+  ovTitle.textContent = title;
+  ovBody.innerHTML = body;
+  ovBtn.textContent = btn;
+  ovBtn.onclick = fn;
+  ov.classList.add('show');
+}
+function hideOverlay(){ ov.classList.remove('show'); }
+
+/* ============================================================
+   HUD
+   ============================================================ */
+function syncHUD(){
+  elLv.textContent = level;
+  elMv.textContent = Math.max(0, moves);
+  elSc.textContent = score;
+  elMvBox.classList.toggle('low', moves <= 5);
+
+  elGoals.innerHTML = '';
+  for (const g of goals){
+    const d = document.createElement('div');
+    d.className = 'goal' + (g.got >= g.need ? ' done' : '');
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.style.background = PALETTE[g.ci].base;
+    const n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = Math.max(0, g.need - g.got);
+    d.append(chip, n);
+    elGoals.append(d);
+  }
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+function drawCube(b, x, y, s){
+  const p = PALETTE[b.ci];
+  const pad = s*0.05, w = s - pad*2;
+  ctx.save();
+  ctx.translate(x + s/2, y + s/2);
+
+  // つぶれ / 消滅アニメ
+  let sx = 1, sy = 1, alpha = 1;
+  if (b.squash > 0){ sx = 1 + b.squash*0.28; sy = 1 - b.squash*0.28; }
+  if (b.popping && b.popDelay <= 0){
+    const t = clamp(b.popT / POP_TIME, 0, 1);
+    const k = t < 0.3 ? 1 + t/0.3*0.28 : (1.28 * (1 - (t-0.3)/0.7));
+    sx *= k; sy *= k; alpha = 1 - t;
+  }
+  ctx.globalAlpha = alpha;
+  ctx.scale(sx, sy);
+  ctx.translate(-w/2, -w/2);
+
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  roundRect(0, w*0.06, w, w, w*0.24); ctx.fill();
+
+  // 本体
+  const grad = ctx.createLinearGradient(0,0,0,w);
+  grad.addColorStop(0, p.light);
+  grad.addColorStop(0.45, p.base);
+  grad.addColorStop(1, p.dark);
+  ctx.fillStyle = grad;
+  roundRect(0,0,w,w,w*0.24); ctx.fill();
+
+  // ツヤ
+  ctx.fillStyle = 'rgba(255,255,255,.42)';
+  roundRect(w*0.14, w*0.1, w*0.72, w*0.3, w*0.15); ctx.fill();
+
+  // 縁
+  ctx.strokeStyle = 'rgba(0,0,0,.22)';
+  ctx.lineWidth = Math.max(1, w*0.035);
+  roundRect(0,0,w,w,w*0.24); ctx.stroke();
+
+  // ブースターの絵柄
+  if (b.type !== T_CUBE) drawIcon(b, w);
+  ctx.restore();
+}
+
+function drawIcon(b, w){
+  ctx.save();
+  ctx.translate(w/2, w/2);
+
+  if (b.type === T_ROCKET_H || b.type === T_ROCKET_V){
+    if (b.type === T_ROCKET_V) ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(0,0,0,.35)';
+    ctx.lineWidth = w*0.03;
+    // ロケット本体
+    ctx.beginPath();
+    ctx.moveTo(w*0.32, 0);
+    ctx.lineTo(w*0.05, -w*0.15);
+    ctx.lineTo(-w*0.26, -w*0.15);
+    ctx.lineTo(-w*0.26, w*0.15);
+    ctx.lineTo(w*0.05, w*0.15);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // 炎
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath();
+    ctx.moveTo(-w*0.26, -w*0.13);
+    ctx.lineTo(-w*0.42, 0);
+    ctx.lineTo(-w*0.26, w*0.13);
+    ctx.closePath(); ctx.fill();
+  }
+
+  else if (b.type === T_BOMB){
+    ctx.fillStyle = '#241a33';
+    ctx.beginPath(); ctx.arc(0, w*0.04, w*0.27, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.arc(-w*0.09, -w*0.05, w*0.07, 0, Math.PI*2); ctx.fill();
+    // 導火線
+    ctx.strokeStyle = '#c98a3a'; ctx.lineWidth = w*0.05; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(w*0.1, -w*0.16);
+    ctx.quadraticCurveTo(w*0.26, -w*0.3, w*0.18, -w*0.4);
+    ctx.stroke();
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath(); ctx.arc(w*0.17, -w*0.43, w*0.06, 0, Math.PI*2); ctx.fill();
+  }
+
+  else if (b.type === T_RAINBOW){
+    const R = w*0.3, seg = 6;
+    for (let i=0;i<seg;i++){
+      ctx.fillStyle = PALETTE[i].base;
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.arc(0, 0, R, b.spin + i/seg*Math.PI*2, b.spin + (i+1)/seg*Math.PI*2);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.beginPath(); ctx.arc(-R*0.28, -R*0.3, R*0.24, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = w*0.035;
+    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function render(){
+  const W = COLS*CELL, H = ROWS*CELL;
+  ctx.clearRect(0,0,W,H);
+
+  ctx.save();
+  if (shake > 0){
+    const m = shake * CELL * 0.32;
+    ctx.translate((Math.random()*2-1)*m, (Math.random()*2-1)*m);
+  }
+
+  // マス目
+  ctx.fillStyle = 'rgba(255,255,255,.045)';
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+    if ((r+c) % 2) continue;
+    ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+  }
+
+  // ブロック（盤外の予備ブロックはクリップで隠す）
+  ctx.save();
+  roundRect(0,0,W,H,22); ctx.clip();
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+    const b = grid[r][c];
+    if (b) drawCube(b, c*CELL, b.y, CELL);
+  }
+  ctx.restore();
+
+  // パーティクル
+  for (const p of particles){
+    const t = 1 - p.age/p.life;
+    ctx.globalAlpha = t;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size*t, p.size*t);
+  }
+  ctx.globalAlpha = 1;
+
+  // スコア表示
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const f of floaters){
+    const t = f.age/f.life;
+    ctx.globalAlpha = 1 - t*t;
+    ctx.font = '800 ' + (CELL*0.46) + 'px system-ui, sans-serif';
+    ctx.lineWidth = CELL*0.12;
+    ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    ctx.strokeText(f.text, f.x, f.y);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+/* ============================================================
+   サイズ調整
+   ============================================================ */
+function resize(){
+  const wrapW = Math.min(document.getElementById('app').clientWidth - 24, 480);
+  const maxH  = window.innerHeight - 250;
+  CELL = Math.max(26, Math.floor(Math.min(wrapW/COLS, maxH/ROWS)));
+
+  const W = COLS*CELL, H = ROWS*CELL;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  canvas.width  = W*dpr;
+  canvas.height = H*dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  // 既存ブロックの座標を新しいセルサイズに合わせる
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++){
+    const b = grid[r] && grid[r][c];
+    if (!b) continue;
+    b.targetY = b.row*CELL;
+    if (b.y >= 0) b.y = b.targetY;
+  }
+}
+window.addEventListener('resize', resize);
+
+/* ============================================================
+   ボタン
+   ============================================================ */
+document.getElementById('rstBtn').onclick = () => { hideOverlay(); buildLevel(); };
+ovBtn2.onclick = () => { level = 1; score = 0; buildLevel(); hideOverlay(); };
+const sndBtn = document.getElementById('sndBtn');
+sndBtn.onclick = () => {
+  soundOn = !soundOn;
+  sndBtn.classList.toggle('off', !soundOn);
+  if (soundOn) beep(600,.1,'sine',.05);
+};
+
+/* ============================================================
+   メインループ
+   ============================================================ */
+let last = 0;
+function loop(ts){
+  const dt = Math.min(0.05, (ts - last)/1000 || 0);
+  last = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+buildLevel();
+resize();
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
