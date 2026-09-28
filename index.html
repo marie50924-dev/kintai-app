@@ -249,24 +249,44 @@ function statusLabel(s){
   return { not_started:'未出勤', working:'勤務中', on_break:'休憩中', finished:'勤務終了' }[s] || s;
 }
 
-// 令和8年 月額表 甲欄 電算機計算特例（社保控除0、要再検証）
+// 令和8年分 月額表 甲欄「電算機計算の特例」（国税庁 denshi_01.pdf）／社保控除0として計算
+// A: 社会保険料等控除後の給与  B: 課税給与所得金額 = A − 給与所得控除 − 扶養等控除 − 基礎控除
 function calcIncomeTax(gross, dependents){
-  const A = Math.floor(gross);
-  const dep = Math.max(0, Math.min(7, dependents||0));
-  const exemptionLine = 88000 + dep * 31667;
-  if(A < exemptionLine) return 0;
-  let baseTax = 0;
-  if(A < 162500)        baseTax = (A * 0.06126 - 1560);
-  else if(A < 275000)   baseTax = (A * 0.07143 - 3213);
-  else if(A < 579167)   baseTax = (A * 0.08163 - 6066);
-  else if(A < 750000)   baseTax = (A * 0.11408 - 25793);
-  else if(A < 1500000)  baseTax = (A * 0.20530 - 109280);
-  else if(A < 3500000)  baseTax = (A * 0.23693 - 156776);
-  else if(A < 7000000)  baseTax = (A * 0.40840 - 757071);
-  else                  baseTax = (A * 0.45945 - 1115672);
-  baseTax -= dep * 1610;
-  const tax = baseTax * 1.0021;
-  return Math.floor(Math.max(0, tax));
+  const A = Math.max(0, Math.floor(Number(gross) || 0));
+  const dep = Math.max(0, Math.min(7, parseInt(dependents, 10) || 0));
+
+  // 第1表 給与所得控除（1円未満切り上げ）
+  let kyuyo;
+  if(A <= 158333)      kyuyo = 54167;
+  else if(A <= 299999) kyuyo = Math.ceil(A * 0.30 + 6667);
+  else if(A <= 549999) kyuyo = Math.ceil(A * 0.20 + 36667);
+  else if(A <= 708330) kyuyo = Math.ceil(A * 0.10 + 91667);
+  else                 kyuyo = 162500;
+
+  // 第2表 配偶者・扶養控除（源泉控除対象親族1人につき 31,667円）
+  const fuyo = 31667 * dep;
+
+  // 第3表 基礎控除
+  let kiso;
+  if(A <= 2120833)      kiso = 48334;
+  else if(A <= 2162499) kiso = 40000;
+  else if(A <= 2204166) kiso = 26667;
+  else if(A <= 2245833) kiso = 13334;
+  else                  kiso = 0;
+
+  const B = A - kyuyo - fuyo - kiso;
+  if(B <= 0) return 0;
+
+  // 第4表 税率（復興特別所得税込み）→ 10円未満四捨五入
+  let tax;
+  if(B <= 162500)       tax = B * 0.05105;
+  else if(B <= 275000)  tax = B * 0.10210 - 8296;
+  else if(B <= 579166)  tax = B * 0.20420 - 36374;
+  else if(B <= 750000)  tax = B * 0.23483 - 54113;
+  else if(B <= 1500000) tax = B * 0.33693 - 130688;
+  else if(B <= 3333333) tax = B * 0.40840 - 237893;
+  else                  tax = B * 0.45945 - 408061;
+  return Math.max(0, Math.round(tax / 10) * 10);
 }
 
 function calcPayroll(employee, totalMinutes){
@@ -772,7 +792,7 @@ function PayrollScreen({ state }){
         <input type="month" className="input" style={{flex:1,margin:0}} value={month} onChange={function(e){ setMonth(e.target.value); }} />
       </div>
 
-      <div className="helper" style={{marginBottom:12}}>令和8年 月額表 甲欄(電算機計算特例) ／ 社保控除0 として計算</div>
+      <div className="helper" style={{marginBottom:12}}>令和8年分 月額表 甲欄(電算機計算の特例) ／ 社会保険料控除0 として計算</div>
 
       {rows.length === 0 ? <div className="empty">社員未登録</div> : null}
 
